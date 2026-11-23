@@ -4,7 +4,6 @@ use eframe::egui;
 use std::{
     collections::HashMap,
     ffi::c_void,
-    mem,
     net::Ipv4Addr,
     process::Command,
     sync::{
@@ -88,8 +87,6 @@ mod win {
         extended_data_count: u16, user_data_length: u16,
         extended_data: *mut c_void, user_data: *mut c_void, user_context: *mut c_void,
     }
-    type EventCallback = Option<unsafe extern "system" fn(*mut EventRecord)>;
-
     #[link(name = "advapi32")]
     unsafe extern "system" {
         fn StartTraceW(handle: *mut u64, name: *const u16, properties: *mut c_void) -> u32;
@@ -281,7 +278,7 @@ mod win {
         }
         *etw_error().lock().unwrap() = None;
         ETW_RUNNING.store(true, Ordering::SeqCst);
-        thread::spawn(run_etw);
+        thread::spawn(|| unsafe { run_etw() });
         thread::sleep(Duration::from_millis(300));
         etw_error().lock().unwrap().is_none()
     }
@@ -438,6 +435,8 @@ impl Default for TrafficMonitorApp {
 impl TrafficMonitorApp {
     fn start(&mut self) {
         let ok = win::start_etw(&self.proxy);
+        let (_, etw_error) = win::etw_snapshot();
+        self.etw_error = etw_error;
         let (rx,tx) = win::adapter_bytes();
         self.base_in = rx; self.base_out = tx; self.last_in = rx; self.last_out = tx;
         self.start_time = Some(Instant::now()); self.last_tick = Instant::now();
@@ -564,7 +563,7 @@ impl eframe::App for TrafficMonitorApp {
             ui.horizontal(|ui| {
                 ui.label("Обновление (с):");
                 egui::ComboBox::from_id_salt("interval").width(48.0).selected_text(format!("{}",self.interval)).show_ui(ui, |ui| {
-                    for v in [0.1f32,0.2,0.5,1.0,5.0] { ui.selectable_value(&mut self.interval,v,format!("{v:g}")); }
+                    for v in [0.1f32,0.2,0.5,1.0,5.0] { ui.selectable_value(&mut self.interval,v,format!("{v}")); }
                 });
                 if !win::is_admin() && ui.button("Админ").clicked() {
                     if win::relaunch_admin() { ctx.send_viewport_cmd(egui::ViewportCommand::Close); }
